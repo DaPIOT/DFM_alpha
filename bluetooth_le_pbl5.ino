@@ -11,7 +11,8 @@
 
 #define SERVICE_UUID        "4fafc201-1fb5-459e-8fcc-c5c9c331914b"
 #define CHARACTERISTIC_UUID "beb5483e-36e1-4688-b7f5-ea07361b26a8"
-
+#define PIR_front    6
+#define PIR_backward 5
 #define LED_PIN      4
 #define LED_PIN_R    3
 #define BTN_UP       2
@@ -19,15 +20,21 @@
 #define BTN_DOWN     0
 
 #define SCREEN_WIDTH 128
-#define SCREEN_HEIGHT 64
+#define SCREEN_HEIGHT 32
 #define OLED_RESET   -1
 
 Preferences prefs;
+Adafruit_AHTX0 aht;
+ScioSense_ENS160 ens160(ENS160_I2CADDR_1);
+BLECharacteristic *pCharacteristic;
+Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
 
-const int MAX_CONTACTS = 10;           // allow up to 10 entries
+const int MAX_CONTACTS = 40;           
 int contactCount   = 0;               // how many are stored now
 String contacts[MAX_CONTACTS];
 String phones  [MAX_CONTACTS];
+volatile bool callInProgress = false;
+String    urcBuffer      = "";
 
 uint8_t indexFlag;
 int8_t humidity;
@@ -51,10 +58,6 @@ unsigned long lastSelectPressTime = 0;
 volatile bool upPressed = false;
 volatile bool downPressed = false;
 
-Adafruit_AHTX0 aht;
-ScioSense_ENS160 ens160(ENS160_I2CADDR_1);
-BLECharacteristic *pCharacteristic;
-Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
 
 //— Hàm lưu danh bạ vào NVS — 
 void saveContacts() {
@@ -86,7 +89,30 @@ void loadContacts() {
 void makeCall(const String &phone) {
   Serial.printf("Calling %s...\n", phone.c_str());
   Serial1.print("ATD" + phone + ";\r\n");
-  delay(100);
+  // check phone state during  a call
+  /* 0: the call is active
+    1: 
+    2:
+  */
+  display.clearDisplay(); 
+  display.clearDisplay();
+  display.setTextSize(1);
+  display.setTextColor(WHITE);
+  display.setCursor(20, 15);
+  display.println("Calling...");
+  display.display();
+  callInProgress = true;
+  urcBuffer      = "";
+//   //if(oncall){
+//   display.setTextSize(1);
+//   display.setTextColor(WHITE);
+//   display.setCursor(20, 15);
+//   display.println("Calling...");
+//   display.display();
+//   }else if (the call is ended){
+//     drawMenu();
+//   }
+
 }
 
 class MyCallbacks: public BLECharacteristicCallbacks {
@@ -153,6 +179,8 @@ void setup() {
   Serial1.begin(115200, SERIAL_8N1, 20, 21);
   loadContacts();
   setCpuFrequencyMhz(80);
+  pinMode(PIR_front,INPUT);
+   pinMode(PIR_backward,INPUT);
   pinMode(LED_PIN, OUTPUT);
   pinMode(LED_PIN_R, OUTPUT);
   pinMode(BTN_UP, INPUT_PULLUP);
@@ -165,15 +193,16 @@ void setup() {
 
   display.begin(SSD1306_SWITCHCAPVCC, 0x3C);
   display.clearDisplay();
-
-  // 2) Vẽ tiêu đề
+  display.setRotation(2);
   display.setTextSize(4);
   display.setTextColor(WHITE);
-  display.setCursor(20, 15);
+  display.setCursor(0, 15);
   display.println("L42Y");
   display.display();
 
-  delay(4000);
+  delay(4000);  // replace by setup SIM
+  //ìf setup done ? drawMenu();
+
   display.setTextSize(1);
   drawMenu();
 
@@ -202,8 +231,8 @@ void loop() {
   static unsigned long lastToggle = 0, lastScan = 0;
   unsigned long now = millis();
   const unsigned long interval = 500;
-
-  if (deviceConnected && (now - lastScan >= 5000)) {
+  handleCallResponse();
+  if (deviceConnected && (now - lastScan >= 10000)) {
     readSensor();
     lastScan = now;
     char buffer[30];
@@ -211,20 +240,29 @@ void loop() {
     pCharacteristic->setValue(buffer);
     pCharacteristic->notify();
 
-  }else if (!deviceConnected && (now - lastToggle >= interval)) {
-    lastToggle = now;
-    digitalWrite(LED_PIN, !digitalRead(LED_PIN));
+  }else if (!deviceConnected) {
+    if(digitalRead(PIR_front) || digitalRead(PIR_backward)){
+      //send message to driver's phone number
+    } else {
+        if(now - lastToggle >= interval){
+          lastToggle = now;
+          digitalWrite(LED_PIN, !digitalRead(LED_PIN));
+        }
+
+        if(now - lastScan >= 20000){
+          readSensor();
+          if(indexFlag == 1 || indexFlag == 2){
+            // send a message to driver
+          }else if (indexFlag == 3){
+            // send to driver and parents
+          }
+        }
+    }
   }
 
-  if((indexFlag == 1 || indexFlag == 2) && (now - lastToggle >= 500)){
-    digitalWrite(LED_PIN_R, !digitalRead(LED_PIN_R));
-  }else if (indexFlag == 3 && (now - lastToggle >= 200)){
-    digitalWrite(LED_PIN_R, !digitalRead(LED_PIN_R));
-  }
 
   if (upPressed) {
     upPressed = false;
-    delay(50);
     if (digitalRead(BTN_UP) == LOW && contactCount>0) {
       selectedIndex = (selectedIndex - 1 + contactCount) % contactCount;
       drawMenu();
@@ -233,30 +271,46 @@ void loop() {
 
   if (downPressed) {
     downPressed = false;
-    delay(50);
     if (digitalRead(BTN_DOWN) == LOW && contactCount>0) {
       selectedIndex = (selectedIndex + 1) % contactCount;
       drawMenu();
     }
   }
-
+// Child press 9 times in row to call their parent
   if (pressCount > 0 && (now - lastPressTime > MULTI_PRESS_WINDOW_MS)) {
     pressCount = 0;
     if (selectPressCount >= 9 && contactCount>0) {
       makeCall(phones[selectedIndex]);
-      digitalWrite(LED_PIN_R, HIGH);
+
       selectPressCount = 0;
     }
   }
 }
 
 void drawMenu() {
+  const int lineHeight = 10;
+  const int visibleLines = SCREEN_HEIGHT / lineHeight; 
+
+  int windowStart = 0;
+  if (selectedIndex >= visibleLines) {
+    windowStart = selectedIndex - (visibleLines - 1);
+    if (windowStart + visibleLines > contactCount) {
+      windowStart = max(0, contactCount - visibleLines);
+    }
+  }
+
   display.clearDisplay();
-  for (int i = 0; i < contactCount; i++) {
-    if (i == selectedIndex) display.setTextColor(BLACK, WHITE);
-    else display.setTextColor(WHITE);
-    display.setCursor(0, i * 10);
-    display.println(contacts[i]);
+  for (int line = 0; line < visibleLines; line++) {
+    int idx = windowStart + line;
+    if (idx >= contactCount) break;
+
+    if (idx == selectedIndex) {
+      display.setTextColor(BLACK, WHITE); 
+    } else {
+      display.setTextColor(WHITE);
+    }
+    display.setCursor(0, line * lineHeight);
+    display.println(contacts[idx]);
   }
   display.display();
 }
@@ -277,6 +331,46 @@ void readSensor() {
   if (ens160.geteCO2() > thresholdCO2) setbit(0); else clearbit(0);
 
 }
+void handleCallResponse() {
+  if (!callInProgress) return;
+
+  while (Serial1.available()) {
+    char c = Serial1.read();
+    urcBuffer += c;
+
+    if (c == '\n') {
+      urcBuffer.trim();
+
+      Serial.println("URC: " + urcBuffer); 
+
+      // Case 1: Call connected (answered)
+      if (urcBuffer.startsWith("CONNECT") ||
+          urcBuffer.indexOf("VOICE CALL: BEGIN") >= 0 ||
+          urcBuffer.indexOf("+CLCC:") >= 0) {
+        Serial.println("Call answered.");
+        display.clearDisplay();
+        display.setTextSize(1);
+        display.setTextColor(WHITE);
+        display.setCursor(0, 10);
+        display.println("Call in progress...");
+        display.display();
+      }
+
+      // Case 2: Call ended without answer or hangup
+      else if (urcBuffer.startsWith("NO CARRIER") ||
+               urcBuffer.startsWith("BUSY") ||
+               urcBuffer.startsWith("NO ANSWER") ||
+               urcBuffer.startsWith("ERROR")) {
+        Serial.println("Call ended: " + urcBuffer);
+        callInProgress = false;
+        drawMenu();
+      }
+
+      urcBuffer = "";
+    }
+  }
+}
+
 
 void setbit(uint8_t index) {
   indexFlag |= (1 << index);
