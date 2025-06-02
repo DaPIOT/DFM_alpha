@@ -34,6 +34,8 @@ int contactCount   = 0;               // how many are stored now
 String contacts[MAX_CONTACTS];
 String phones  [MAX_CONTACTS];
 volatile bool callInProgress = false;
+volatile bool callAnswered = false;
+
 String    urcBuffer      = "";
 
 uint8_t indexFlag;
@@ -261,7 +263,7 @@ void loop() {
   }
 
 
-  if (upPressed) {
+  if (!callInProgress && upPressed) {
     upPressed = false;
     if (digitalRead(BTN_UP) == LOW && contactCount>0) {
       selectedIndex = (selectedIndex - 1 + contactCount) % contactCount;
@@ -269,7 +271,7 @@ void loop() {
     }
   }
 
-  if (downPressed) {
+  if (!callInProgress &&  downPressed) {
     downPressed = false;
     if (digitalRead(BTN_DOWN) == LOW && contactCount>0) {
       selectedIndex = (selectedIndex + 1) % contactCount;
@@ -341,13 +343,13 @@ void handleCallResponse() {
     if (c == '\n') {
       urcBuffer.trim();
 
-      Serial.println("URC: " + urcBuffer); 
-
-      // Case 1: Call connected (answered)
+      // --- Call answered ---
       if (urcBuffer.startsWith("CONNECT") ||
           urcBuffer.indexOf("VOICE CALL: BEGIN") >= 0 ||
           urcBuffer.indexOf("+CLCC:") >= 0) {
         Serial.println("Call answered.");
+        callAnswered = true;
+
         display.clearDisplay();
         display.setTextSize(1);
         display.setTextColor(WHITE);
@@ -356,17 +358,32 @@ void handleCallResponse() {
         display.display();
       }
 
-      // Case 2: Call ended without answer or hangup
+      // --- Call ended ---
       else if (urcBuffer.startsWith("NO CARRIER") ||
                urcBuffer.startsWith("BUSY") ||
-               urcBuffer.startsWith("NO ANSWER") ||
-               urcBuffer.startsWith("ERROR")) {
-        Serial.println("Call ended: " + urcBuffer);
+               urcBuffer.startsWith("NO ANSWER")) {
         callInProgress = false;
-        drawMenu();
+
+        display.clearDisplay();
+        display.setTextSize(1);
+        display.setTextColor(WHITE);
+        display.setCursor(0, 10);
+
+        if (callAnswered) {
+          display.println("Call ended.");
+          Serial.println("Call ended normally.");
+        } else {
+          display.println("Call failed.");
+          Serial.println("Call failed before answer.");
+        }
+
+        display.display();
+        delay(2000);  // show message for 2 sec
+        callAnswered = false;  // reset for next call
+        drawMenu();            // back to main menu
       }
 
-      urcBuffer = "";
+      urcBuffer = ""; // reset buffer
     }
   }
 }
