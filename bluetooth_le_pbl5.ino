@@ -61,7 +61,7 @@ volatile bool upPressed = false;
 volatile bool downPressed = false;
 
 
-//— Hàm lưu danh bạ vào NVS — 
+// Hàm lưu danh bạ vào NVS  
 void saveContacts() {
   prefs.begin("contacts", false);
   prefs.putUInt("count", contactCount);
@@ -72,7 +72,7 @@ void saveContacts() {
   prefs.end();
 }
 
-//— Hàm đọc danh bạ từ NVS — 
+// Hàm đọc danh bạ từ NVS 
 void loadContacts() {
   // mặc định nếu NVS rỗng
   contactCount = 0;
