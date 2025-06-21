@@ -243,8 +243,8 @@ void setup() {
   display.println("L42Y");
   display.display();
 
-  delay(4000);  // replace by setup SIM
-  //ìf setup done ? drawMenu();
+  delay(4000);  // replace by module Sim setup
+  
 
   display.setTextSize(1);
   drawMenu();
