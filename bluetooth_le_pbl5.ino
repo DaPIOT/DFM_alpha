@@ -29,6 +29,10 @@ ScioSense_ENS160 ens160(ENS160_I2CADDR_1);
 BLECharacteristic *pCharacteristic;
 Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
 
+// Display State Machine
+enum DisplayState : uint8_t { MENU_STATE = 0, CALL_STATE = 1 };
+volatile DisplayState displayState = MENU_STATE;
+
 const int MAX_CONTACTS = 40;           
 int contactCount   = 0;               // how many are stored now
 String contacts[MAX_CONTACTS];
@@ -91,11 +95,6 @@ void loadContacts() {
 void makeCall(const String &phone) {
   Serial.printf("Calling %s...\n", phone.c_str());
   Serial1.print("ATD" + phone + ";\r\n");
-  // check phone state during  a call
-  /* 0: the call is active
-    1: 
-    2:
-  */
   display.clearDisplay(); 
   display.clearDisplay();
   display.setTextSize(1);
@@ -104,16 +103,8 @@ void makeCall(const String &phone) {
   display.println("Calling...");
   display.display();
   callInProgress = true;
+  displayState   = CALL_STATE;
   urcBuffer      = "";
-//   //if(oncall){
-//   display.setTextSize(1);
-//   display.setTextColor(WHITE);
-//   display.setCursor(20, 15);
-//   display.println("Calling...");
-//   display.display();
-//   }else if (the call is ended){
-//     drawMenu();
-//   }
 
 }
 String getPhoneByKeyword(const String& keyword) {
@@ -223,7 +214,7 @@ void setup() {
   loadContacts();
   setCpuFrequencyMhz(80);
   pinMode(PIR_front,INPUT);
-   pinMode(PIR_backward,INPUT);
+  pinMode(PIR_backward,INPUT);
   pinMode(LED_PIN, OUTPUT);
   pinMode(LED_PIN_R, OUTPUT);
   pinMode(BTN_UP, INPUT_PULLUP);
@@ -319,7 +310,7 @@ void loop() {
       drawMenu();
     }
   }
-// Child press 9 times in row to call their parent
+// Child presses 9 times in row to call their parent
   if (pressCount > 0 && (now - lastPressTime > MULTI_PRESS_WINDOW_MS)) {
     pressCount = 0;
     if (selectPressCount >= 9 && contactCount>0) {
@@ -334,6 +325,7 @@ void drawMenu() {
   const int visibleLines = SCREEN_HEIGHT / lineHeight; 
 
   int windowStart = 0;
+  if (displayState != MENU_STATE) return;
   if (selectedIndex >= visibleLines) {
     windowStart = selectedIndex - (visibleLines - 1);
     if (windowStart + visibleLines > contactCount) {
@@ -420,6 +412,7 @@ void handleCallResponse() {
         display.display();
         delay(2000);  // show message for 2 sec
         callAnswered = false;  // reset for next call
+        displayState   = MENU_STATE;
         drawMenu();            // back to main menu
       }
 
