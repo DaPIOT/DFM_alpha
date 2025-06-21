@@ -116,6 +116,47 @@ void makeCall(const String &phone) {
 //   }
 
 }
+String getPhoneByKeyword(const String& keyword) {
+  for (int i = 0; i < contactCount; i++) {
+    String lower = contacts[i];
+    lower.toLowerCase();
+    if (lower.indexOf(keyword) >= 0) {
+      return phones[i];
+    }
+  }
+  return "";
+}
+
+void callDriver() {
+  String number = getPhoneByKeyword("driver");
+  if (number.length() > 0) {
+    makeCall(number);
+  } else {
+    Serial.println("[Error] Driver contact not found.");
+  }
+}
+
+void callParent() {
+  String number = getPhoneByKeyword("parent");
+  if (number.length() > 0) {
+    makeCall(number);
+  } else {
+    Serial.println("[Error] Parent contact not found.");
+  }
+}
+
+void callDriverAndParent() {
+  String driver = getPhoneByKeyword("driver");
+  String parent = getPhoneByKeyword("parent");
+
+  if (driver.length() > 0) makeCall(driver);
+  delay(3000);  // optional pause between calls
+  if (parent.length() > 0) makeCall(parent);
+
+  if (driver.length() == 0 && parent.length() == 0) {
+    Serial.println("[Error] No driver or parent contact found.");
+  }
+}
 
 class MyCallbacks: public BLECharacteristicCallbacks {
   void onWrite(BLECharacteristic *p) override {
@@ -244,7 +285,7 @@ void loop() {
 
   }else if (!deviceConnected) {
     if(digitalRead(PIR_front) || digitalRead(PIR_backward)){
-      //send message to driver's phone number
+      callDriver();
     } else {
         if(now - lastToggle >= interval){
           lastToggle = now;
@@ -254,9 +295,9 @@ void loop() {
         if(now - lastScan >= 20000){
           readSensor();
           if(indexFlag == 1 || indexFlag == 2){
-            // send a message to driver
+            callDriver();
           }else if (indexFlag == 3){
-            // send to driver and parents
+            callDriverAndParent();
           }
         }
     }
@@ -283,7 +324,6 @@ void loop() {
     pressCount = 0;
     if (selectPressCount >= 9 && contactCount>0) {
       makeCall(phones[selectedIndex]);
-
       selectPressCount = 0;
     }
   }
@@ -383,7 +423,7 @@ void handleCallResponse() {
         drawMenu();            // back to main menu
       }
 
-      urcBuffer = ""; // reset buffer
+      urcBuffer = ""; 
     }
   }
 }
